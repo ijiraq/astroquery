@@ -1,19 +1,33 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 =============
-Cadc TAP plus
+CADC
 =============
 
 """
 
+from ..utils.class_or_instance import class_or_instance
+from ..utils import async_to_sync, commons
+from ..query import QueryWithLogin
+# prepend_docstr is a way to copy docstrings between methods
+from ..utils import prepend_docstr_nosections
+from bs4 import BeautifulSoup
+import astropy
+import astroquery
+from six import StringIO
+from . import conf
 from astroquery.cadc.cadctap.core import TapPlusCadc
 from astroquery.cadc.cadctap.job import JobCadc
+import logging
 
 import requests
 
-__all__ = ['Cadc', 'CadcTAP']
+__all__ = ['Cadc', 'CadcClass', 'CadcTAP']
 
 DEFAULT_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/tap'
+
+
+logger = logging.getLogger(__name__)
 
 
 class CadcTAP(object):
@@ -156,6 +170,7 @@ class CadcTAP(object):
                                  job._Job__responseMsg)
         cjob.remoteLocation = job.remoteLocation
         cjob.parameters['format'] = job.parameters['format']
+        cjob._phase = job._phase
         if operation == 'async':
             if save_to_file:
                 cjob.save_results(output_file, verbose)
@@ -252,4 +267,211 @@ class CadcTAP(object):
         return self.__cadctap.logout(verbose)
 
 
-Cadc = CadcTAP()
+@async_to_sync
+class CadcClass(QueryWithLogin):
+    """
+    Cadc class
+    """
+
+    CADC_REGISTRY_URL = conf.CADC_REGISTRY_URL
+    CADCTAP_SERVICE_URI = conf.CADCTAP_SERVICE_URI
+    CADCDATALINK_SERVICE_URI = conf.CADCDATLINK_SERVICE_URI
+    TIMEOUT = conf.TIMEOUT
+
+    def __init__(self, *args):
+        """ set some parameters """
+        # do login here
+        self.cadctap = CadcTAP()
+        try:
+            r = requests.get(self.CADC_REGISTRY_URL)
+            r.raise_for_status()
+            self._capabilities = self._parse_reg(r.text)
+        except requests.exceptions.HTTPError as err:
+            logger.debug(
+                "ERROR getting the resource caps: {}".format(str(err)))
+            raise err
+
+        soup = BeautifulSoup(requests.get(self._capabilities[self.CADCDATALINK_SERVICE_URI]).text)
+        print(self._capabilities)
+
+        soup.find_all('capability')[3].find_all('interface')[1].securitymethod[
+            'standardid']
+
+
+
+    #@class_or_instance
+    def query_region_async(self, coordinates, radius = 0.016666666666667,
+                           collection=None,
+                           get_query_payload=False, cache=True):
+        """
+                Queries a region around the specified coordinates.
+
+                Parameters
+                ----------
+                coordinates : str or `astropy.coordinates`.
+                    coordinates around which to query
+                radius : str or `astropy.units.Quantity`.
+                    the radius of the cone search
+                collection: Name of the CADC collection to query, optional
+                get_query_payload : bool, optional
+                    Just return the dict of HTTP request parameters.
+                verbose : bool, optional
+                    Display VOTable warnings or not.
+
+                Returns
+                -------
+                response : `requests.Response`
+                    The HTTP response returned from the service.
+                    All async methods should return the raw HTTP response.
+                """
+
+        request_payload = self._args_to_payload(coordinates=coordinates,
+                                                radius=radius,
+                                                collection=collection)
+        response = self.cadctap.run_query(request_payload['query'],
+                                          operation='sync')
+
+        # primarily for debug purposes, but also useful if you want to send
+        # someone a URL linking directly to the data
+        if get_query_payload:
+            return request_payload
+
+        return response
+
+    def _parse_reg(self, content):
+        # parses the CADC registry and returns a dictionary of services and
+        # the URL to their capabilities
+        capabilities = {}
+        for line in content.splitlines():
+            if len(line) > 0 and not line.startswith('#'):
+                service_id, capabilies_url = line.split('=')
+                capabilities[service_id.strip()] = capabilies_url.strip()
+        return capabilities
+
+    def _login(self, user, password):
+        """
+
+        :param user:
+        :param password:
+        :return:
+        """
+        return self.__cadctap.login(user=user, password=password)
+
+    def _parse_result(self, result, verbose=False):
+        # result is a job
+        #TODO check state of the job
+        if result._phase != 'COMPLETED':
+            raise RuntimeError('Query not completed')
+        return result.results
+
+    def _args_to_payload(self, *args, **kwargs):
+        # convert arguments to a valid requests payload
+        coordinates = commons.parse_coordinates(kwargs['coordinates'])
+        radius = kwargs['radius']
+        collection = kwargs['collection']
+        payload = {format: 'VOTable'}
+        payload['query'] = \
+            "SELECT * from caom2.Observation o join caom2.Plane p " \
+            "ON o.obsID=p.obsID " \
+            "WHERE INTERSECTS( " \
+            "CIRCLE('ICRS', {}, {}, {}), position_bounds) = 1 AND " \
+            "(quality_flag IS NULL OR quality_flag != 'junk')".\
+            format(coordinates.ra.degree, coordinates.dec.degree, radius)
+        if ['collection' in kwargs]:
+            payload['query'] = "{} AND collection='{}'".\
+                format(payload['query'],kwargs['collection'])
+        return payload
+
+    def get_images(self, coordinates, radius=0.016666667,
+                   collection=None, get_query_payload=False):
+        """
+        A query function that searches for image cut-outs around coordinates
+
+        Parameters
+        ----------
+        coordinates : str or `astropy.coordinates`.
+            coordinates around which to query
+        radius : str or `astropy.units.Quantity`.
+            the radius of the cone search
+        get_query_payload : bool, optional
+            If true than returns the dictionary of query parameters, posted to
+            remote server. Defaults to `False`.
+
+        Returns
+        -------
+        A list of `astropy.fits.HDUList` objects
+        """
+        readable_objs = self.get_images_async(coordinates, radius,
+                                              get_query_payload=get_query_payload)
+        if get_query_payload:
+            return readable_objs  # simply return the dict of HTTP request params
+        # otherwise return the images as a list of astropy.fits.HDUList
+        return [obj.get_fits() for obj in readable_objs]
+
+    @prepend_docstr_nosections(get_images.__doc__)
+    def get_images_async(self, coordinates, radius, get_query_payload=False):
+        """
+        Returns
+        -------
+        A list of context-managers that yield readable file-like objects
+        """
+        # As described earlier, this function should return just
+        # the handles to the remote image files. Use the utilities
+        # in commons.py for doing this:
+
+        # first get the links to the remote image files
+        image_urls = self.get_image_list(coordinates, radius,
+                                         get_query_payload=get_query_payload)
+        if get_query_payload:  # if true then return the HTTP request params dict
+            return image_urls
+        # otherwise return just the handles to the image files.
+        return [commons.FileContainer(U) for U in image_urls]
+
+    # the get_image_list method, simply returns the download
+    # links for the images as a list
+
+    @prepend_docstr_nosections(get_images.__doc__)
+    def get_image_list(self, coordinates, radius=0.01666667, collection=None,
+                       get_query_payload=False):
+        """
+        Returns
+        -------
+        list of image urls
+        """
+        # This method should implement steps as outlined below:
+        # 1. Construct the actual dict of HTTP request params.
+        # 2. Check if the get_query_payload is True, in which
+        #    case it should just return this dict.
+        # 3. Otherwise make the HTTP request and receive the
+        #    HTTP response.
+        # 4. Pass this response to the extract_image_urls
+        #    which scrapes it to extract the image download links.
+        # 5. Return the download links as a list.
+        table = self.query_region_async(coordinates=coordinates,
+                                        radius=radius,
+                                        collection=collection,
+                                        get_query_payload=get_query_payload)
+
+        return self.get_image_urls(table['publisherID'])
+
+
+    def get_image_urls(self, publisher_ids):
+        """
+        Helper function that uses the data link web service to resolve a list
+        of publisher IDs into a list of files
+
+        Parameters
+        ----------
+        publisher_ids : list of publisher ids
+            source from which the urls are to be extracted
+
+        Returns
+        -------
+        list of image URLs
+        """
+
+        # find the access URL for the
+
+
+Cadc = CadcClass()
+

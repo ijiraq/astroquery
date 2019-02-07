@@ -1,10 +1,27 @@
-# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-=============
-CADC TAP plus
-=============
-
+Canadian Astronomy Data Centre (CADC).
 """
-from .core import Cadc, CadcTAP
+from astropy import config as _config
 
-__all__ = ['Cadc', 'CadcTAP']
+class Conf(_config.ConfigNamespace):
+    """
+    Configuration parameters for `astroquery.cadc`.
+    """
+
+    CADC_REGISTRY_URL = _config.ConfigItem(
+        'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/reg/resource-caps',
+        'CADC registry information')
+    CADCTAP_SERVICE_URI = _config.ConfigItem('ivo://cadc.nrc.ca/tap',
+                                             'CADC TAP service identifier')
+    CADCDATLINK_SERVICE_URI = _config.ConfigItem(
+        'ivo://cadc.nrc.ca/caom2ops', 'CADC DataLink service identifier')
+    CADC_LOGIN = _config.ConfigItem(
+        'http://www.canfar.phys.uvic.ca/ac/login', 'CADC login page')
+    TIMEOUT = _config.ConfigItem(
+        30, 'Time limit for connecting to template_module server.')
+
+conf = Conf()
+
+from .core import Cadc
+
+__all__ = ['Cadc', 'conf']
