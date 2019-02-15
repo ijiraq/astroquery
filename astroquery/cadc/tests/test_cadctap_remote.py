@@ -16,6 +16,12 @@ class TestCadcClass:
     def test_query_region(self):
         result = Cadc.query_region('08h45m07.5s +54d18m00s',
                                    collection='VLASS')
+        assert 1 == len(result)  # TODO correct?
+
+    def test_get_images(self):
+        result = Cadc.get_images('08h45m07.5s +54d18m00s',
+                                   collection='VLASS')
+
         print(result)
 
 

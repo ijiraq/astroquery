@@ -447,12 +447,12 @@ class CadcClass(QueryWithLogin):
         # 4. Pass this response to the extract_image_urls
         #    which scrapes it to extract the image download links.
         # 5. Return the download links as a list.
-        table = self.query_region_async(coordinates=coordinates,
+        table = self.query_region(coordinates=coordinates,
                                         radius=radius,
                                         collection=collection,
                                         get_query_payload=get_query_payload)
 
-        return self.get_image_urls(table['publisherID'])
+        return self.get_image_urls(table['caomPublisherID'])
 
 
     def get_image_urls(self, publisher_ids):
@@ -470,7 +470,12 @@ class CadcClass(QueryWithLogin):
         list of image URLs
         """
 
-        # find the access URL for the
+        # find the access URL corresponding to the caomPublisherID
+        result = []
+        for id in publisher_ids:
+            pass # TODO find the corresponding url
+
+        return result
 
 
 Cadc = CadcClass()
