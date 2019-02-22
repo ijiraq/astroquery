@@ -490,22 +490,24 @@ class AlmaClass(QueryWithLogin):
         '      <FIELD name="Band" datatype="char" ID="32817" xtype="adql:VARCHAR" arraysize="0*">\r',
         has an invalid ``arraysize`` entry.  Also, it returns a char, but it
         should be an int.
+        As of February 2019, this issue appears to be half-fixed; the arraysize
+        is no longer incorrect, but the data type remains incorrect.
 
         Since that problem was discovered and fixed, many other entries have
-        the same error.
+        the same error.  Feb 2019, the other instances are gone.
 
         According to the IVOA, the tables are wrong, not astropy.io.votable:
         http://www.ivoa.net/documents/VOTable/20130315/PR-VOTable-1.3-20130315.html#ToC11
+
+        A new issue, #1340, noted that 'Release date' and 'Mosaic' both lack data type
+        metadata, necessitating the hack below
         """
         lines = text.split(b"\n")
         newlines = []
 
         for ln in lines:
             if b'FIELD name="Band"' in ln:
-                ln = ln.replace(b'arraysize="0*"', b'arraysize="1*"')
                 ln = ln.replace(b'datatype="char"', b'datatype="int"')
-            elif b'arraysize="0*"' in ln:
-                ln = ln.replace(b'arraysize="0*"', b'arraysize="*"')
             elif b'FIELD name="Release date"' in ln or b'FIELD name="Mosaic"' in ln:
                 ln = ln.replace(b'/>', b' arraysize="*"/>')
             newlines.append(ln)
