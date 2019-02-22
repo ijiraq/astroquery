@@ -506,6 +506,8 @@ class AlmaClass(QueryWithLogin):
                 ln = ln.replace(b'datatype="char"', b'datatype="int"')
             elif b'arraysize="0*"' in ln:
                 ln = ln.replace(b'arraysize="0*"', b'arraysize="*"')
+            elif b'FIELD name="Release date"' in ln or b'FIELD name="Mosaic"' in ln:
+                ln = ln.replace(b'/>', b' arraysize="*"/>')
             newlines.append(ln)
 
         return b"\n".join(newlines)
