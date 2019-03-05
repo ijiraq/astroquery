@@ -14,17 +14,22 @@ from ..utils import prepend_docstr_nosections
 from bs4 import BeautifulSoup
 import astropy
 import astroquery
-from six import StringIO
+from six import BytesIO
+from astropy.io.votable import parse_single_table
 from . import conf
 from astroquery.cadc.cadctap.core import TapPlusCadc
 from astroquery.cadc.cadctap.job import JobCadc
 import logging
+import os
+import re
 
 import requests
 
 __all__ = ['Cadc', 'CadcClass', 'CadcTAP']
 
 DEFAULT_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/tap'
+# TODO - this needs to be deduced through the registry
+DATALINK_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/caom2ops/datalink'
 
 
 logger = logging.getLogger(__name__)
@@ -297,33 +302,31 @@ class CadcClass(QueryWithLogin):
         soup.find_all('capability')[3].find_all('interface')[1].securitymethod[
             'standardid']
 
-
-
-    #@class_or_instance
+    @class_or_instance
     def query_region_async(self, coordinates, radius = 0.016666666666667,
                            collection=None,
                            get_query_payload=False, cache=True):
         """
-                Queries a region around the specified coordinates.
+            Queries the CADC for a region around the specified coordinates.
 
-                Parameters
-                ----------
-                coordinates : str or `astropy.coordinates`.
-                    coordinates around which to query
-                radius : str or `astropy.units.Quantity`.
-                    the radius of the cone search
-                collection: Name of the CADC collection to query, optional
-                get_query_payload : bool, optional
-                    Just return the dict of HTTP request parameters.
-                verbose : bool, optional
-                    Display VOTable warnings or not.
+            Parameters
+            ----------
+            coordinates : str or `astropy.coordinates`.
+                coordinates around which to query
+            radius : str or `astropy.units.Quantity`.
+                the radius of the cone search
+            collection: Name of the CADC collection to query, optional
+            get_query_payload : bool, optional
+                Just return the dict of HTTP request parameters.
+            verbose : bool, optional
+                Display VOTable warnings or not.
 
-                Returns
-                -------
-                response : `requests.Response`
-                    The HTTP response returned from the service.
-                    All async methods should return the raw HTTP response.
-                """
+            Returns
+            -------
+            response : `requests.Response`
+                The HTTP response returned from the service.
+                All async methods should return the raw HTTP response.
+            """
 
         request_payload = self._args_to_payload(coordinates=coordinates,
                                                 radius=radius,
@@ -337,6 +340,79 @@ class CadcClass(QueryWithLogin):
             return request_payload
 
         return response
+
+    @class_or_instance
+    def query_name(self, name):
+        """
+        Query CADC metadata for a name and return the corresponding metadata in
+         the CAOM2 format (http://www.opencadc.org/caom2/).
+
+        Parameters
+        ----------
+        name: str
+                name of object to query for
+
+        Returns
+        -------
+        response : `astropy.Table`
+            Results of the query in a tabular format.
+
+        """
+
+    @class_or_instance
+    def get_data_urls(self, query_result, include_auxilaries=False):
+        """
+        Function to map the results of a CADC query into URLs to
+        corresponding data that can be later downloaded.
+
+        The function uses the IVOA DataLink Service
+        (http://www.ivoa.net/documents/DataLink/) implemented at the CADC.
+        It works directly with the results produced by Cadc.query_region and
+        Cadc.query_name but in principle it can work with other query
+        results produced with the CadcTAP query as long as the results
+        contain the 'caomPublisherID' column. This column is part of the
+        caom2.Plane table.
+
+        Parameters
+        ----------
+        query_result : result returned by Cadc.query_region() or
+                    Cadc.query_name(). In general, the result of any
+                    CADC TAP query that contains the 'caomPublisherID' column
+                    can be use here.
+        include_auxiliaries : boolean
+                    True to return URLs to auxiliary files such as
+                    previews, False otherwise
+
+        Returns
+        -------
+        A list of URLs to data.
+        """
+
+        if not query_result:
+            raise AttributeError('Missing metadata argument')
+
+        try:
+            publisher_ids = query_result['caomPublisherID']
+        except KeyError:
+            raise AttributeError(
+                'caomPublisherID column missing from query_result argument')
+        result = []
+        for pid in publisher_ids:
+            response = requests.get(DATALINK_URL, params={'ID': pid})
+            response.raise_for_status()
+            buffer = BytesIO(response.content)
+
+            # at this point we don't need cutouts or other SODA services so
+            # just get the urls from the response VOS table
+            tb = parse_single_table(buffer)
+            for row in tb.array:
+                semantics = row['semantics'].decode('ascii')
+                if semantics == '#this':
+                    result.append(row['access_url'].decode('ascii'))
+                elif row['access_url'] and include_auxilaries:
+                    result.append(row['access_url'].decode('ascii'))
+        return result
+
 
     def _parse_reg(self, content):
         # parses the CADC registry and returns a dictionary of services and
@@ -368,7 +444,6 @@ class CadcClass(QueryWithLogin):
         # convert arguments to a valid requests payload
         coordinates = commons.parse_coordinates(kwargs['coordinates'])
         radius = kwargs['radius']
-        collection = kwargs['collection']
         payload = {format: 'VOTable'}
         payload['query'] = \
             "SELECT * from caom2.Observation o join caom2.Plane p " \
@@ -377,105 +452,10 @@ class CadcClass(QueryWithLogin):
             "CIRCLE('ICRS', {}, {}, {}), position_bounds) = 1 AND " \
             "(quality_flag IS NULL OR quality_flag != 'junk')".\
             format(coordinates.ra.degree, coordinates.dec.degree, radius)
-        if ['collection' in kwargs]:
+        if ['collection' in kwargs] and kwargs['collection']:
             payload['query'] = "{} AND collection='{}'".\
                 format(payload['query'],kwargs['collection'])
         return payload
-
-    def get_images(self, coordinates, radius=0.016666667,
-                   collection=None, get_query_payload=False):
-        """
-        A query function that searches for image cut-outs around coordinates
-
-        Parameters
-        ----------
-        coordinates : str or `astropy.coordinates`.
-            coordinates around which to query
-        radius : str or `astropy.units.Quantity`.
-            the radius of the cone search
-        get_query_payload : bool, optional
-            If true than returns the dictionary of query parameters, posted to
-            remote server. Defaults to `False`.
-
-        Returns
-        -------
-        A list of `astropy.fits.HDUList` objects
-        """
-        readable_objs = self.get_images_async(coordinates, radius,
-                                              get_query_payload=get_query_payload)
-        if get_query_payload:
-            return readable_objs  # simply return the dict of HTTP request params
-        # otherwise return the images as a list of astropy.fits.HDUList
-        return [obj.get_fits() for obj in readable_objs]
-
-    @prepend_docstr_nosections(get_images.__doc__)
-    def get_images_async(self, coordinates, radius, get_query_payload=False):
-        """
-        Returns
-        -------
-        A list of context-managers that yield readable file-like objects
-        """
-        # As described earlier, this function should return just
-        # the handles to the remote image files. Use the utilities
-        # in commons.py for doing this:
-
-        # first get the links to the remote image files
-        image_urls = self.get_image_list(coordinates, radius,
-                                         get_query_payload=get_query_payload)
-        if get_query_payload:  # if true then return the HTTP request params dict
-            return image_urls
-        # otherwise return just the handles to the image files.
-        return [commons.FileContainer(U) for U in image_urls]
-
-    # the get_image_list method, simply returns the download
-    # links for the images as a list
-
-    @prepend_docstr_nosections(get_images.__doc__)
-    def get_image_list(self, coordinates, radius=0.01666667, collection=None,
-                       get_query_payload=False):
-        """
-        Returns
-        -------
-        list of image urls
-        """
-        # This method should implement steps as outlined below:
-        # 1. Construct the actual dict of HTTP request params.
-        # 2. Check if the get_query_payload is True, in which
-        #    case it should just return this dict.
-        # 3. Otherwise make the HTTP request and receive the
-        #    HTTP response.
-        # 4. Pass this response to the extract_image_urls
-        #    which scrapes it to extract the image download links.
-        # 5. Return the download links as a list.
-        table = self.query_region(coordinates=coordinates,
-                                        radius=radius,
-                                        collection=collection,
-                                        get_query_payload=get_query_payload)
-
-        return self.get_image_urls(table['caomPublisherID'])
-
-
-    def get_image_urls(self, publisher_ids):
-        """
-        Helper function that uses the data link web service to resolve a list
-        of publisher IDs into a list of files
-
-        Parameters
-        ----------
-        publisher_ids : list of publisher ids
-            source from which the urls are to be extracted
-
-        Returns
-        -------
-        list of image URLs
-        """
-
-        # find the access URL corresponding to the caomPublisherID
-        result = []
-        for id in publisher_ids:
-            pass # TODO find the corresponding url
-
-        return result
 
 
 Cadc = CadcClass()
