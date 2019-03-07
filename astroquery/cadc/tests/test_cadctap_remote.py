@@ -30,7 +30,19 @@ class TestCadcClass:
         result2 = Cadc.query_region('08h45m07.5s +54d18m00s')
         assert len(result) == len(result2[result2['collection'] == 'CFHT'])
 
-    def test_query_name(self):
-        target = SkyCoord.from_name('M31')
-        result = Cadc.query_region(target)
-        print(result)
+        # search for a target
+        results = Cadc.query_region(SkyCoord.from_name('M31'))
+        assert len(results) > 20
+
+    def atest_query_name(self):
+        result1 = Cadc.query_name('M31')
+        assert len(result1) > 20
+        # test case insensitive
+        result2 = Cadc.query_name('m31')
+        assert len(result1) == len(result2)
+
+    def test_query(self):
+        result3 = Cadc.query(
+            "select count(*) from caom2.Observation where target_name='M31'")
+        assert 1000 < result3[0][0]
+

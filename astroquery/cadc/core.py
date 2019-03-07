@@ -8,10 +8,10 @@ CADC
 
 from ..utils.class_or_instance import class_or_instance
 from ..utils import async_to_sync, commons
-from ..query import QueryWithLogin
+from ..query import BaseQuery
 # prepend_docstr is a way to copy docstrings between methods
 from ..utils import prepend_docstr_nosections
-from bs4 import BeautifulSoup
+from bs4 import BeautifulStoneSoup
 import astropy
 import astroquery
 from six import BytesIO
@@ -20,12 +20,12 @@ from . import conf
 from astroquery.cadc.cadctap.core import TapPlusCadc
 from astroquery.cadc.cadctap.job import JobCadc
 import logging
-import os
+import xml
 import re
 
 import requests
 
-__all__ = ['Cadc', 'CadcClass', 'CadcTAP']
+__all__ = ['Cadc', 'CadcClass']
 
 DEFAULT_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/tap'
 # TODO - this needs to be deduced through the registry
@@ -35,10 +35,38 @@ DATALINK_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/caom2ops/datalink'
 logger = logging.getLogger(__name__)
 
 
-class CadcTAP(object):
+@async_to_sync
+class CadcClass(BaseQuery):
     """
-    Proxy class to default TapPlus object (pointing to CADA Archive)
+    Class for accessing CADC data. Typical usage:
+
+    result = Cadc.query_region('08h45m07.5s +54d18m00s', collection='CFHT')
+
+    ... do something with result (optional) such as filter as in example below
+
+    urls = Cadc.get_data_urls(result[result['target_name']=='Nr3491_1'])
+
+    ... access data
+
+    Other ways to query the CADC data storage:
+    - target name:
+        Cadc.query_region(SkyCoord.from_name('M31'))
+    - target name in the metadata:
+        Cadc.query_name('M31-A-6')  # queries as a like '%lower(name)%'
+    - TAP query on the CADC metadata (CAOM2 format -
+        http://www.opencadc.org/caom2/)
+        Cadc.get_tables()  # list the tables
+        Cadc.get_table(table_name)  # list table schema
+        Cadc.query
+
+
     """
+
+    CADC_REGISTRY_URL = conf.CADC_REGISTRY_URL
+    CADCTAP_SERVICE_URI = conf.CADCTAP_SERVICE_URI
+    CADCDATALINK_SERVICE_URI = conf.CADCDATLINK_SERVICE_URI
+    TIMEOUT = conf.TIMEOUT
+
     def __init__(self, url=None, tap_plus_handler=None, verbose=False):
         """
         Initialize CadcTAP object
@@ -56,6 +84,22 @@ class CadcTAP(object):
         -------
         CadcTAP object
         """
+
+        try:
+            r = requests.get(self.CADC_REGISTRY_URL)
+            r.raise_for_status()
+            self._capabilities = self._parse_reg(r.text)
+        except requests.exceptions.HTTPError as err:
+            logger.debug(
+                "ERROR getting the resource caps: {}".format(str(err)))
+            raise err
+
+        soup = BeautifulStoneSoup(requests.get(self._capabilities[self.CADCDATALINK_SERVICE_URI]).text)
+        print(self._capabilities)
+
+        soup.find_all('capability')[3].find_all('interface')[1].securitymethod[
+            'standardid']
+
         if url is not None and tap_plus_handler is not None:
             raise AttributeError('Can not input both url and tap handler')
 
@@ -68,6 +112,146 @@ class CadcTAP(object):
                 self.__cadctap = TapPlusCadc(url=url, verbose=verbose)
         else:
             self.__cadctap = tap_plus_handler
+
+    def login(self, user=None, password=None, certificate_file=None,
+              cookie_prefix=None, login_url=None, verbose=False):
+        """
+        Login, set varibles to use for logging in
+
+        Parameters
+        ----------
+        user : str, required if certificate is None
+            username to login with
+        password : str, required if user is set
+            password to login with
+        certificate : str, required if user is None
+            path to certificate to use with logging in
+        verbose : bool, optional, default 'False'
+            flag to display information about the process
+        """
+
+        return self.__cadctap.login(user=user, password=password,
+                                    certificate_file=certificate_file,
+                                    cookie_prefix=cookie_prefix,
+                                    login_url=login_url,
+                                    verbose=verbose)
+
+    def logout(self, verbose=False):
+        """
+        Logout
+        """
+        return self.__cadctap.logout(verbose)
+
+    @class_or_instance
+    def query_region_async(self, coordinates, radius = 0.016666666666667,
+                           collection=None,
+                           get_query_payload=False):
+        """
+            Queries the CADC for a region around the specified coordinates.
+
+            Parameters
+            ----------
+            coordinates : str or `astropy.coordinates`.
+                coordinates around which to query
+            radius : str or `astropy.units.Quantity`.
+                the radius of the cone search
+            collection: Name of the CADC collection to query, optional
+            get_query_payload : bool, optional
+                Just return the dict of HTTP request parameters.
+
+            Returns
+            -------
+            response : `requests.Response`
+                The HTTP response returned from the service.
+                All async methods should return the raw HTTP response.
+            """
+
+        request_payload = self._args_to_payload(coordinates=coordinates,
+                                                radius=radius,
+                                                collection=collection)
+        # primarily for debug purposes, but also useful if you want to send
+        # someone a URL linking directly to the data
+        if get_query_payload:
+            return request_payload
+        response = self.run_query(request_payload['query'], operation='sync')
+        return response
+
+    @class_or_instance
+    def query_name_async(self, name):
+        """
+        Query CADC metadata for a name and return the corresponding metadata in
+         the CAOM2 format (http://www.opencadc.org/caom2/).
+
+        Parameters
+        ----------
+        name: str
+                name of object to query for
+
+        Returns
+        -------
+        response : `astropy.Table`
+            Results of the query in a tabular format.
+
+        """
+        response = self.run_query(
+            "select * from caom2.Observation o join caom2.Plane p "
+            "on o.obsID=p.obsID where lower(target_name) like '%{}%'".
+                format(name.lower()), operation='sync')
+        return response
+
+    @class_or_instance
+    def get_data_urls(self, query_result, include_auxilaries=False):
+        """
+        Function to map the results of a CADC query into URLs to
+        corresponding data that can be later downloaded.
+
+        The function uses the IVOA DataLink Service
+        (http://www.ivoa.net/documents/DataLink/) implemented at the CADC.
+        It works directly with the results produced by Cadc.query_region and
+        Cadc.query_name but in principle it can work with other query
+        results produced with the CadcTAP query as long as the results
+        contain the 'caomPublisherID' column. This column is part of the
+        caom2.Plane table.
+
+        Parameters
+        ----------
+        query_result : result returned by Cadc.query_region() or
+                    Cadc.query_name(). In general, the result of any
+                    CADC TAP query that contains the 'caomPublisherID' column
+                    can be use here.
+        include_auxiliaries : boolean
+                    True to return URLs to auxiliary files such as
+                    previews, False otherwise
+
+        Returns
+        -------
+        A list of URLs to data.
+        """
+
+        if not query_result:
+            raise AttributeError('Missing metadata argument')
+
+        try:
+            publisher_ids = query_result['caomPublisherID']
+        except KeyError:
+            raise AttributeError(
+                'caomPublisherID column missing from query_result argument')
+        result = []
+        for pid in publisher_ids:
+            response = requests.get(DATALINK_URL, params={'ID': pid})
+            response.raise_for_status()
+            buffer = BytesIO(response.content)
+
+            # at this point we don't need cutouts or other SODA services so
+            # just get the urls from the response VOS table
+            tb = parse_single_table(buffer)
+            for row in tb.array:
+                semantics = row['semantics'].decode('ascii')
+                if semantics == '#this':
+                    result.append(row['access_url'].decode('ascii'))
+                elif row['access_url'] and include_auxilaries:
+                    result.append(row['access_url'].decode('ascii'))
+        return result
 
     def get_tables(self, only_names=False, verbose=False):
         """
@@ -103,6 +287,22 @@ class CadcTAP(object):
         """
         return self.__cadctap.load_table(table,
                                          verbose)
+
+    def query_async(self, query):
+        """
+        Runs a query and returns results in Table format
+
+        Parameters
+        ----------
+        query: str
+            query: query to run
+
+        Returns
+        -------
+
+        results in astropy.Table format
+        """
+        return self.run_query(query, operation='sync')
 
     def run_query(self, query, operation, output_file=None,
                   output_format="votable", verbose=False,
@@ -242,177 +442,6 @@ class CadcTAP(object):
         """
         return self.__cadctap.save_results(job, filename, verbose)
 
-    def login(self, user=None, password=None, certificate_file=None,
-              cookie_prefix=None, login_url=None, verbose=False):
-        """
-        Login, set varibles to use for logging in
-
-        Parameters
-        ----------
-        user : str, required if certificate is None
-            username to login with
-        password : str, required if user is set
-            password to login with
-        certificate : str, required if user is None
-            path to certificate to use with logging in
-        verbose : bool, optional, default 'False'
-            flag to display information about the process
-        """
-
-        return self.__cadctap.login(user=user, password=password,
-                                    certificate_file=certificate_file,
-                                    cookie_prefix=cookie_prefix,
-                                    login_url=login_url,
-                                    verbose=verbose)
-
-    def logout(self, verbose=False):
-        """
-        Logout
-        """
-        return self.__cadctap.logout(verbose)
-
-
-@async_to_sync
-class CadcClass(QueryWithLogin):
-    """
-    Cadc class
-    """
-
-    CADC_REGISTRY_URL = conf.CADC_REGISTRY_URL
-    CADCTAP_SERVICE_URI = conf.CADCTAP_SERVICE_URI
-    CADCDATALINK_SERVICE_URI = conf.CADCDATLINK_SERVICE_URI
-    TIMEOUT = conf.TIMEOUT
-
-    def __init__(self, *args):
-        """ set some parameters """
-        # do login here
-        self.cadctap = CadcTAP()
-        try:
-            r = requests.get(self.CADC_REGISTRY_URL)
-            r.raise_for_status()
-            self._capabilities = self._parse_reg(r.text)
-        except requests.exceptions.HTTPError as err:
-            logger.debug(
-                "ERROR getting the resource caps: {}".format(str(err)))
-            raise err
-
-        soup = BeautifulSoup(requests.get(self._capabilities[self.CADCDATALINK_SERVICE_URI]).text)
-        print(self._capabilities)
-
-        soup.find_all('capability')[3].find_all('interface')[1].securitymethod[
-            'standardid']
-
-    @class_or_instance
-    def query_region_async(self, coordinates, radius = 0.016666666666667,
-                           collection=None,
-                           get_query_payload=False, cache=True):
-        """
-            Queries the CADC for a region around the specified coordinates.
-
-            Parameters
-            ----------
-            coordinates : str or `astropy.coordinates`.
-                coordinates around which to query
-            radius : str or `astropy.units.Quantity`.
-                the radius of the cone search
-            collection: Name of the CADC collection to query, optional
-            get_query_payload : bool, optional
-                Just return the dict of HTTP request parameters.
-            verbose : bool, optional
-                Display VOTable warnings or not.
-
-            Returns
-            -------
-            response : `requests.Response`
-                The HTTP response returned from the service.
-                All async methods should return the raw HTTP response.
-            """
-
-        request_payload = self._args_to_payload(coordinates=coordinates,
-                                                radius=radius,
-                                                collection=collection)
-        response = self.cadctap.run_query(request_payload['query'],
-                                          operation='sync')
-
-        # primarily for debug purposes, but also useful if you want to send
-        # someone a URL linking directly to the data
-        if get_query_payload:
-            return request_payload
-
-        return response
-
-    @class_or_instance
-    def query_name(self, name):
-        """
-        Query CADC metadata for a name and return the corresponding metadata in
-         the CAOM2 format (http://www.opencadc.org/caom2/).
-
-        Parameters
-        ----------
-        name: str
-                name of object to query for
-
-        Returns
-        -------
-        response : `astropy.Table`
-            Results of the query in a tabular format.
-
-        """
-
-    @class_or_instance
-    def get_data_urls(self, query_result, include_auxilaries=False):
-        """
-        Function to map the results of a CADC query into URLs to
-        corresponding data that can be later downloaded.
-
-        The function uses the IVOA DataLink Service
-        (http://www.ivoa.net/documents/DataLink/) implemented at the CADC.
-        It works directly with the results produced by Cadc.query_region and
-        Cadc.query_name but in principle it can work with other query
-        results produced with the CadcTAP query as long as the results
-        contain the 'caomPublisherID' column. This column is part of the
-        caom2.Plane table.
-
-        Parameters
-        ----------
-        query_result : result returned by Cadc.query_region() or
-                    Cadc.query_name(). In general, the result of any
-                    CADC TAP query that contains the 'caomPublisherID' column
-                    can be use here.
-        include_auxiliaries : boolean
-                    True to return URLs to auxiliary files such as
-                    previews, False otherwise
-
-        Returns
-        -------
-        A list of URLs to data.
-        """
-
-        if not query_result:
-            raise AttributeError('Missing metadata argument')
-
-        try:
-            publisher_ids = query_result['caomPublisherID']
-        except KeyError:
-            raise AttributeError(
-                'caomPublisherID column missing from query_result argument')
-        result = []
-        for pid in publisher_ids:
-            response = requests.get(DATALINK_URL, params={'ID': pid})
-            response.raise_for_status()
-            buffer = BytesIO(response.content)
-
-            # at this point we don't need cutouts or other SODA services so
-            # just get the urls from the response VOS table
-            tb = parse_single_table(buffer)
-            for row in tb.array:
-                semantics = row['semantics'].decode('ascii')
-                if semantics == '#this':
-                    result.append(row['access_url'].decode('ascii'))
-                elif row['access_url'] and include_auxilaries:
-                    result.append(row['access_url'].decode('ascii'))
-        return result
-
 
     def _parse_reg(self, content):
         # parses the CADC registry and returns a dictionary of services and
@@ -423,15 +452,6 @@ class CadcClass(QueryWithLogin):
                 service_id, capabilies_url = line.split('=')
                 capabilities[service_id.strip()] = capabilies_url.strip()
         return capabilities
-
-    def _login(self, user, password):
-        """
-
-        :param user:
-        :param password:
-        :return:
-        """
-        return self.__cadctap.login(user=user, password=password)
 
     def _parse_result(self, result, verbose=False):
         # result is a job
@@ -456,6 +476,21 @@ class CadcClass(QueryWithLogin):
             payload['query'] = "{} AND collection='{}'".\
                 format(payload['query'],kwargs['collection'])
         return payload
+
+
+@async_to_sync
+class CadcClassGarbage(object):
+    """
+    Cadc class
+    """
+
+
+
+    def __init__(self, *args):
+        """ set some parameters """
+        # do login here
+        self.cadctap = CadcTAP()
+
 
 
 Cadc = CadcClass()
