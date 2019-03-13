@@ -217,7 +217,8 @@ class ConnectionHandlerCadc(ConnectionHandler):
         """
         # Prepare the certificate
         context = ssl.create_default_context()
-        context.load_cert_chain(self.__certificate)
+        if self.__certificate:
+            context.load_cert_chain(self.__certificate)
         return httplib.HTTPSConnection(self._ConnectionHandler__connHost,
                                        self._ConnectionHandler__connPortSsl,
                                        context=context)

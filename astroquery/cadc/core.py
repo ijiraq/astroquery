@@ -11,7 +11,7 @@ from ..utils import async_to_sync, commons
 from ..query import BaseQuery
 # prepend_docstr is a way to copy docstrings between methods
 from ..utils import prepend_docstr_nosections
-from bs4 import BeautifulStoneSoup
+from bs4 import BeautifulSoup
 import astropy
 import astroquery
 from six import BytesIO
@@ -29,7 +29,6 @@ __all__ = ['Cadc', 'CadcClass']
 
 DEFAULT_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/tap'
 # TODO - this needs to be deduced through the registry
-DATALINK_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/caom2ops/datalink'
 
 
 logger = logging.getLogger(__name__)
@@ -85,33 +84,26 @@ class CadcClass(BaseQuery):
         CadcTAP object
         """
 
-        try:
-            r = requests.get(self.CADC_REGISTRY_URL)
-            r.raise_for_status()
-            self._capabilities = self._parse_reg(r.text)
-        except requests.exceptions.HTTPError as err:
-            logger.debug(
-                "ERROR getting the resource caps: {}".format(str(err)))
-            raise err
-
-        soup = BeautifulStoneSoup(requests.get(self._capabilities[self.CADCDATALINK_SERVICE_URI]).text)
-        print(self._capabilities)
-
-        soup.find_all('capability')[3].find_all('interface')[1].securitymethod[
-            'standardid']
-
         if url is not None and tap_plus_handler is not None:
             raise AttributeError('Can not input both url and tap handler')
 
         if tap_plus_handler is None:
             if url is None:
+                u = get_access_url(self.CADCTAP_SERVICE_URI)
+                # remove capabilities endpoint to get to the service url
+                u = u.rstrip('capabilities')
                 self.__cadctap = TapPlusCadc(
-                    url=DEFAULT_URL,
+                    url=u,
                     verbose=verbose)
             else:
                 self.__cadctap = TapPlusCadc(url=url, verbose=verbose)
         else:
             self.__cadctap = tap_plus_handler
+
+        self.data_link_url = get_access_url(
+            self.CADCDATALINK_SERVICE_URI,
+            "ivo://ivoa.net/std/DataLink#links-1.0")
+
 
     def login(self, user=None, password=None, certificate_file=None,
               cookie_prefix=None, login_url=None, verbose=False):
@@ -238,7 +230,7 @@ class CadcClass(BaseQuery):
                 'caomPublisherID column missing from query_result argument')
         result = []
         for pid in publisher_ids:
-            response = requests.get(DATALINK_URL, params={'ID': pid})
+            response = requests.get(self.data_link_url, params={'ID': pid})
             response.raise_for_status()
             buffer = BytesIO(response.content)
 
@@ -478,19 +470,80 @@ class CadcClass(BaseQuery):
         return payload
 
 
-@async_to_sync
-class CadcClassGarbage(object):
+def static_vars(**kwargs):
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+    return decorate
+
+@static_vars(caps={})
+def get_access_url(service, capability=None):
     """
-    Cadc class
+    Returns the URL corresponding to a service by doing a lookup in the cadc
+    registry. It returns the access URL corresponding to cookie authentication.
+
+    This function implements the functionality of a CADC registry as defined by the IVOA.
+    It should be eventually moved to its own directory.
+    :param service: the service the capability belongs to. It can be identified
+    by a CADC uri ('ivo://cadc.nrc.ca/) which is looked up in the CADC registry or
+    by the URL where the service capabilities is found.
+    :param capability: uri representing the capability for which the access
+    url is sought
+    :return: the access url
     """
 
+    caps_url = ''
+    if service.startswith('http'):
+        if not capability:
+            return service
+        caps_url = service
+    else:
+        # get caps from the CADC registry
+        if not get_access_url.caps:
+            try:
+                r = requests.get(conf.CADC_REGISTRY_URL)
+                r.raise_for_status()
+            except requests.exceptions.HTTPError as err:
+                logger.debug(
+                    "ERROR getting the CADC registry: {}".format(str(err)))
+                raise err
+            for line in r.text.splitlines():
+                if len(line) > 0 and not line.startswith('#'):
+                    service_id, capabilies_url = line.split('=')
+                    get_access_url.caps[service_id.strip()] = capabilies_url.strip()
+        # lookup the service
+        service_uri = service
+        if not service.startswith('ivo'):
+            # assume short form of CADC service
+            service_uri = 'ivo://cadc.nrc.ca/{}'.format(service)
+        if service_uri not in get_access_url.caps:
+            raise AttributeError(
+                "Cannot find the capabilities of service {}".format(service))
+        # look up in the CADC reg for the service capabilities
+        caps_url = get_access_url.caps[service_uri]
+        if not capability:
+            return caps_url
+    try:
+        c = requests.get(caps_url)
+        c.raise_for_status()
+    except Exception as e:
+        logger.debug(
+            "ERROR getting the service capabilities: {}".format(str(e)))
+        raise e
 
-
-    def __init__(self, *args):
-        """ set some parameters """
-        # do login here
-        self.cadctap = CadcTAP()
-
+    soup = BeautifulSoup(c.text)
+    for cap in soup.find_all('capability'):
+        if cap.get("standardid", None) == capability:
+            if len(cap.find_all('interface')) == 1:
+                return cap.find_all('interface')[0].accessurl
+            for i in cap.find_all('interface'):
+                if hasattr(i, 'securitymethod'):
+                    sm = i.securitymethod
+                    if not sm or sm.get("standardid", None) == None or\
+                        sm['standardid']=="ivo://ivoa.net/sso#cookie":
+                        return i.accessurl.text
+    raise RuntimeError("ERROR - capabilitiy {} not found".format(capability))
 
 
 Cadc = CadcClass()

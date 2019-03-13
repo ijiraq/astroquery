@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 @remote_data
 class TestCadcClass:
     # now write tests for each method here
-    def atest_query_region(self):
+    def test_query_region(self):
         result = Cadc.query_region('08h45m07.5s +54d18m00s', collection='CFHT')
         # do some manipulation of the results. Below it's filtering out based
         # on target name but other manipulations are possible.
@@ -34,7 +34,7 @@ class TestCadcClass:
         results = Cadc.query_region(SkyCoord.from_name('M31'))
         assert len(results) > 20
 
-    def atest_query_name(self):
+    def test_query_name(self):
         result1 = Cadc.query_name('M31')
         assert len(result1) > 20
         # test case insensitive
