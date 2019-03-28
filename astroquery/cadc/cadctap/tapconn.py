@@ -5,20 +5,15 @@ TAP plus
 =============
 
 """
-from astroquery.utils.tap.xmlparser import utils
-from astroquery.utils.tap.conn.tapconn import TapConn
-from astroquery.utils.tap.conn.tapconn import ConnectionHandler
-
-try:
-    # python 3
-    import http.client as httplib
-except ImportError:
-    # python 2
-    import httplib
-
 import ssl
 import mimetypes
 import time
+
+from six.moves import http_client as httplib
+
+from astroquery.utils.tap.xmlparser import utils
+from astroquery.utils.tap.conn.tapconn import TapConn
+from astroquery.utils.tap.conn.tapconn import ConnectionHandler
 
 __all__ = ['TapConn']
 
@@ -28,7 +23,8 @@ CONTENT_TYPE_POST_DEFAULT = "application/x-www-form-urlencoded"
 class TapConnCadc(TapConn):
     """TAP plus connection class
     Provides low level HTTP connection capabilities
-    Reason for change
+
+    Notes
     -----------------
     Add functions to go to other places
     """
@@ -53,7 +49,8 @@ class TapConnCadc(TapConn):
         connhandler connection handler object, optional, default None
             HTTP(s) connection hander (creator). If no handler is provided, a
             new one is created.
-        Reason for change
+
+        Notes
         -----------------
         Make a ConnectionHandlerCadc instead of the original __init__ creating
         a ConnectionHandler object
@@ -151,7 +148,8 @@ class TapConnCadc(TapConn):
         Returns
         -------
         The suitable content-type and the body for the request
-        Reason for change
+
+        Notes
         -----------------
         In boundary use * instead of =, async processor complains if it has =
         """
@@ -186,7 +184,7 @@ class TapConnCadc(TapConn):
 class ConnectionHandlerCadc(ConnectionHandler):
     def __init__(self, host, port, sslport):
         """
-        Reason for change
+        Notes
         -----------------
         Add a certificate variable
         """
@@ -195,23 +193,23 @@ class ConnectionHandlerCadc(ConnectionHandler):
 
     def get_connection(self, ishttps=False, cookie=None, verbose=False):
         """
-        Reason for change
+        Notes
         -----------------
         If using certificates get secure not if using cookies
         """
-        if (ishttps) or (self.__certificate is not None):
+        if self.__certificate is not None:
             if verbose:
-                print("------>https")
+                print("------>Cert")
             return self.get_connection_secure(verbose)
         else:
             if verbose:
-                print("------>http")
-            return httplib.HTTPConnection(self._ConnectionHandler__connHost,
-                                          self._ConnectionHandler__connPort)
+                print("------>Cookie")
+            return httplib.HTTPSConnection(self._ConnectionHandler__connHost,
+                                           self._ConnectionHandler__connPort)
 
     def get_connection_secure(self, verbose):
         """
-        Reason for change
+        Notes
         -----------------
         Add certificate to connection
         """

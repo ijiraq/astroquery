@@ -3,16 +3,113 @@
 .. _astroquery.cadc:
 
 *****************************
-Cadc TAP (`astroquery.cadc`)
+Cadc (`astroquery.cadc`)
 *****************************
 
 The Canadian Astronomy Data Centre (CADC) is a world-wide distribution centre for
 astronomical data obtained from telescopes. The CADC specializes in data mining,
 data processing, data distribution and data transferring of very large
-astronomical datasets. 
+astronomical datasets.
 
 This package allows the access to the data at the CADC
 (http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca)
+
+============
+Basic Access
+============
+
+The most basic ways to access the CADC data and metadata is by region or by
+name. The following example queries CADC for Canada France Hawaii Telescope
+data for a given region and resolves the URLs for downloading the corresponding
+data.
+
+.. code-block:: python
+
+  >>> from astroquery.cadc import Cadc
+  >>>
+  >>> warnings.filterwarnings('ignore')  # turn off astropy warnings (optional)
+  >>> cadc = Cadc()
+  >>> result = cadc.query_region('08h45m07.5s +54d18m00s', collection='CFHT')
+  >>> print(result)
+    caomObservationURI sequenceNumber proposal_keywords target_standard ... energy_transition_transition          time_bounds [2]           polarization_states      lastModified_2
+                                                                    ...                                              d
+    ------------------ -------------- ----------------- --------------- ... ---------------------------- ---------------------------------- ------------------- -----------------------
+    caom:CFHT/2376828        2376828                                 0 ...                               58546.328009 .. 58546.32960815509                     2019-03-04T08:14:46.470
+    caom:CFHT/2366188        2366188                                 0 ...                              58490.4676995 .. 58490.47001630555                     2019-02-07T12:41:55.814
+    caom:CFHT/2366432        2366432                                 0 ...                               58491.407547 .. 58491.40986379398                     2019-02-07T12:24:09.625
+    caom:CFHT/2366188        2366188                                 0 ...                              58490.4676995 .. 58490.47001630555                     2019-01-07T11:27:37.922
+    caom:CFHT/2366432        2366432                                 0 ...                               58491.407547 .. 58491.40986379398                     2019-01-08T10:03:36.057
+
+  >>> urls = cadc.get_data_urls(result)
+  >>> for url in urls:
+  >>>     print(url)
+
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2376828o.fits.fz?RUNID=xo7r3w23t22gr8zz
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2366188p.fits.fz?RUNID=c27nw5wjv4c116wx
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2366432p.fits.fz?RUNID=ucfuuhr12uik5y9z
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2366188o.fits.fz?RUNID=pbrewkej9zpm65qp
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2366432o.fits.fz?RUNID=bwh3jo0povcdx503
+
+
+The next example queries all the data in that region and filters the results
+on the name of the target (as an example, any other filtering possible) and
+resolves the URLs for both the primary and auxiliary data (in this case
+preview files)
+
+.. code-block:: python
+
+  >>> from astroquery.cadc import Cadc
+  >>>
+  >>> cadc = Cadc()
+  >>> result = cadc.query_region('08h45m07.5s +54d18m00s')
+  >>> print(len(result))
+
+        662
+
+  >>> urls = cadc.get_data_urls(result[result['target_name'] == 'Nr3491_1'],
+                                include_auxiliaries=True)
+  >>>for url in urls:
+  >>>>    print(url)
+
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2376828o_preview_zoom_1024.jpg?RUNID=bxpv43misqekd16f
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2376828o.fits.fz?RUNID=bxpv43misqekd16f
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2376828o_preview_1024.jpg?RUNID=bxpv43misqekd16f
+    https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/data/pub/CFHT/2376828o_preview_256.jpg?RUNID=bxpv43misqekd16f
+
+
+CADC data can also be queried on the target name. Note that the name is not
+resolve. Instead it is matched against the target name in the CADC metadata.
+
+.. code-block:: python
+
+  >>> from astroquery.cadc import Cadc
+  >>>
+  >>> cadc = Cadc()
+  >>> result = cadc.query_name('M31)
+  >>> print(len(result))
+
+    2000
+
+  >>> result = cadc.query_name('Nr3491_1')
+  >>> print(result)
+
+    caomObservationURI sequenceNumber proposal_keywords target_standard ... energy_transition_transition          time_bounds [2]          polarization_states      lastModified_2
+                                                                        ...                                              d
+    ------------------ -------------- ----------------- --------------- ... ---------------------------- --------------------------------- ------------------- -----------------------
+     caom:CFHT/2376828        2376828                                 0 ...                              58546.328009 .. 58546.32960815509                     2019-03-04T08:14:46.470
+
+
+Note that the examples above are for accessing data anonymously. Users with
+access to proprietary data can call ```login``` on the ```cadc``` object
+before querying or accessing the data.
+
+CADC metadata is available through a TAP service. While the above interfaces
+offer a quick but simple access to the data, the TAP interface presented in
+the next sections allows for more complex queries.
+
+=============================
+Query CADC metadata using TAP
+=============================
 
 Cadc TAP access is based on a TAP+ REST service. TAP+ is an extension of
 Table Access Protocol (TAP: http://www.ivoa.net/documents/TAP/) specified by the
@@ -41,13 +138,13 @@ link, enter your information and wait for confirmation of your account creation.
 There are two type of authentication:
 
 * Username/Password
-  Cadc.login(user='yourusername', password='yourpassword')
+  Cadc().login(user='yourusername', password='yourpassword')
 
 * Certificate
-  Cadc.login(certificate_file='path/to/certificate/file')
+  Cadc().login(certificate_file='path/to/certificate/file')
 
 For certificate authentication to get a certificate go to
-http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/, choose a language, login, click
+https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/, choose a language, login, click
 on your name where the login button used to be, from the drop-down menu click
 Obtain a Certificate and save the certificate. When adding authentication used
 the path to where you saved the certificate. Remember that certificates expire
@@ -63,9 +160,13 @@ There is one way to logout which will cancel any kind of authentication that was
 * Logout
   Cadc.logout()
 
-========
-Examples
-========
+CADC metadata is modeled using the CAOM (Common Archive Observation Model) -
+https://www.opencadc.org/caom2/
+
+
+======================
+Examples of TAP access
+======================
 
 ---------------------------
 1. Non authenticated access
@@ -80,8 +181,9 @@ To get list of table objects
 
   >>> from astroquery.cadc import Cadc
   >>>
-  >>> tables=Cadc.get_tables()
-  >>> for table in (tables):
+  >>> cadc = Cadc()
+  >>> tables=cadc.get_tables()
+  >>> for table in tables:
   >>>   print(table.get_qualified_name())
 
   Retrieving tables...
@@ -120,8 +222,8 @@ To get a single table object
 
   >>> from astroquery.cadc import Cadc
   >>>
-  >>> name='caom2.caom2.Observation'
-  >>> table=Cadc.get_table(table=name)
+  >>> cadc = Cadc()
+  >>> table=cadc.get_table(table='caom2.caom2.Observation')
   >>> for col in table.columns:
   >>>   print(col.name)
 
@@ -189,7 +291,8 @@ Query without saving results in a file:
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>> job = Cadc.run_query("SELECT observationID, intent FROM caom2.Observation", 'sync')
+  >>> cadc = Cadc()
+  >>> job = cadc.run_query("SELECT observationID, intent FROM caom2.Observation", 'sync')
   >>> print(job.get_results())
 
             observationID             intent  
@@ -223,7 +326,8 @@ Query saving results in a file:
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>> job = Cadc.run_query("SELECT TOP 10 observationID, obsID FROM caom2.Observation AS Observation", 'sync',
+  >>> cadc = Cadc()
+  >>> job = cadc.run_query("SELECT TOP 10 observationID, obsID FROM caom2.Observation AS Observation", 'sync',
   >>>                      output_file='test_output_noauth.tsv', output_format='tsv')
 
 1.5 Synchronous query with temporary uploaded table
@@ -234,10 +338,10 @@ A table can be uploaded to the server in order to be used in a query.
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-
+  >>> cadc = Cadc()
   >>> upload_resource = 'data/votable.xml'
 
-  >>> j = Cadc.run_query("SELECT * FROM tap_upload.test_table_upload", 'sync', \
+  >>> j = cadc.run_query("SELECT * FROM tap_upload.test_table_upload", 'sync', \
   >>>                    upload_resource=upload_resource, upload_table_name="test_table_upload")
   >>> print(j.get_results())
 
@@ -260,9 +364,9 @@ Query without saving results in a file:
 
 .. code-block:: python
 
-  >>> from astroquery.cadc import Cadc
-  >>>
-  >>> job = Cadc.run_query("SELECT observationID, instrument_name, target_name FROM caom2.Observation AS Observation", 'async')
+  >>> from astroquery.cadc import cadc
+  >>> cadc = Cadc()
+  >>> job = cadc.run_query("SELECT observationID, instrument_name, target_name FROM caom2.Observation AS Observation", 'async')
   >>> print(job.get_results())
 
           observationID          instrument_name           target_name           
@@ -297,8 +401,8 @@ Query saving results in a file:
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>>
-  >>> job = Cadc.run_query("SELECT observationID, instrument_name, target_name FROM caom2.Observation AS Observation", \
+  >>> cadc = Cadc()
+  >>> job = cadc.run_query("SELECT observationID, instrument_name, target_name FROM caom2.Observation AS Observation", \
   >>>                      'async', output_file='outputFile.tsv', output_format='tsv')
   >>> print(job.get_results())
 
@@ -338,8 +442,8 @@ Asynchronous jobs can be loaded. You need the jobid in order to load the job.
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>>
-  >>> job=Cadc.load_async_job(jobid='ichozdcz23g5r20f')
+  >>> cadc = Cadc()
+  >>> job = cadc.load_async_job(jobid='ichozdcz23g5r20f')
   >>> print(job.get_results())
 
           observationID          ...            caomObservationURI           
@@ -389,7 +493,8 @@ Login with username and password
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>> Cadc.login(user='userName', password='userPassword')
+  >>> cadc = Cadc()
+  >>> cadc.login(user='userName', password='userPassword')
 
 
 Login with certificate
@@ -397,7 +502,8 @@ Login with certificate
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>> Cadc.login(certificate_file='/path/to/cert/file')
+  >>> cadc = Cadc()
+  >>> cadc.login(certificate_file='/path/to/cert/file')
 
 
 To perform a logout
@@ -406,7 +512,8 @@ To perform a logout
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>> Cadc.logout()
+  >>> cadc = Cadc()
+  >>> cadc.logout()
 
 2.2 List asynchronous jobs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -416,9 +523,9 @@ List all asynchronous jobs the user has created. Must be logged in in order to k
 .. code-block:: python
 
   >>> from astroquery.cadc import Cadc
-  >>>
-  >>> Cadc.login(user=user, password=password)
-  >>> job_list=Cadc.list_async_jobs()
+  >>> cadc = Cadc()
+  >>> cadc.login(user=user, password=password)
+  >>> job_list=cadc.list_async_jobs()
   >>> for job in job_list:
   >>>   print(job.jobid)
 

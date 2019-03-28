@@ -5,32 +5,28 @@ TAP plus
 =============
 
 """
+import os.path
+
+import requests
+from six.moves.urllib.parse import urlencode
+from six.moves import http_client as httplib
+
 from astroquery.utils.tap.core import TapPlus
 from astroquery.cadc.cadctap.tapconn import TapConnCadc
 from astroquery.cadc.cadctap.jobSaxParser import JobSaxParserCadc
-import requests
-import os.path
-from astropy.extern.six.moves.urllib.parse import urlencode
 
-try:
-    # python 3
-    import http.client as httplib
-except ImportError:
-    # python 2
-    import httplib
 
 __all__ = ['TapPlusCadc']
 
 VERSION = "1.0.1"
 TAP_CLIENT_ID = "aqtappy-" + VERSION
-DEFAULT_LOGIN_URL = 'http://www.canfar.phys.uvic.ca/ac/login'
-DEFAULT_COOKIE_PREFIX = 'CADC_SSO='
 
 
 class TapPlusCadc(TapPlus):
     """TAP plus class
     Provides TAP and TAP+ capabilities
-    Reason for change
+
+    Notes
     -----------------
     To override some parts of the utils/tap library in order for it to
     function with the CADC's implementation of TAP
@@ -62,7 +58,8 @@ class TapPlusCadc(TapPlus):
             new one is created.
         verbose : bool, optional, default 'True'
             flag to display information about the process
-        Reason for change
+
+        Notes
         -----------------
         In order to use the new version of TapConn which is TapConnCadc it
         had to be passed in at this level instead of being created in the
@@ -113,7 +110,8 @@ class TapPlusCadc(TapPlus):
         Returns
         -------
         A table object
-        Reason for change
+
+        Notes
         -----------------
         TAP load table sends parameter '?table=tablename' to the /tables url
         but this isn't available for all implementations
@@ -132,7 +130,8 @@ class TapPlusCadc(TapPlus):
     def _Tap__launchJobMultipart(self, query, uploadResource, uploadTableName,
                                  outputFormat, context, verbose, name=None):
         """
-        Reason for change
+
+        Notes
         -----------------
         Get rid of PHASE:RUN in args and if async job send PHASE:RUN to
         async/phase in order to get the job to run
@@ -170,7 +169,8 @@ class TapPlusCadc(TapPlus):
     def _Tap__launchJob(self, query, outputFormat,
                         context, verbose, name=None):
         """
-        Reason for change
+
+        Notes
         -----------------
         Get rid of PHASE:RUN in args and if async job send PHASE:RUN to
         async/phase in order to get the job to run
@@ -222,7 +222,8 @@ class TapPlusCadc(TapPlus):
         Returns
         -------
         A Job object
-        Reason for change
+
+        Notes
         -----------------
         In order to output a JobCadc instead of just a Job object, and
         to add more information to the JobCadc becuase it causes errors
@@ -269,7 +270,8 @@ class TapPlusCadc(TapPlus):
             job
         verbose : bool, optional, default 'False'
             flag to display information about the process
-        Reason for change
+
+        Notes
         -----------------
         To send in the filename to the new save_results function in JobCadc
         """
@@ -291,7 +293,8 @@ class TapPlusCadc(TapPlus):
             location of the certificate
         verbose : bool, optional, default 'False'
             flag to display information about the process
-        Reason for change
+
+        Notes
         -----------------
         Add certificates to the login
         """
@@ -331,7 +334,7 @@ class TapPlusCadc(TapPlus):
 
     def __dologin(self, cookie_prefix=None, login_url=None, verbose=False):
         """
-        Reason for change
+        Notes
         -----------------
         Decode and set the cookie with the right key
         """
@@ -354,11 +357,7 @@ class TapPlusCadc(TapPlus):
             # extract cookie
             cookie = response.read()
             c = cookie.decode()
-            if cookie_prefix is None:
-                prefix = DEFAULT_COOKIE_PREFIX
-            else:
-                prefix = cookie_prefix
-            cookie = prefix + c
+            cookie = '{}="{}"'.format(cookie_prefix, c)
             if cookie is not None:
                 self._TapPlus__isLoggedIn = True
                 connHandler.set_cookie(cookie)
@@ -369,7 +368,8 @@ class TapPlusCadc(TapPlus):
         ----------
         verbose : bool, optional, default 'False'
             flag to display information about the process
-        Reason for change
+
+        Notes
         -----------------
         Clear the certificate as well
         """
@@ -382,7 +382,7 @@ class TapPlusCadc(TapPlus):
 
     def __execLogin(self, usr, pwd, login_url=None, verbose=False):
         """
-        Reason for change
+        Notes
         -----------------
         Send to the right login url, send not using the TapConn object
         because it redirects instead of giving you a cookie
@@ -392,11 +392,9 @@ class TapPlusCadc(TapPlus):
             "password": str(pwd)}
         data = urlencode(args)
         if login_url is None:
-            url = DEFAULT_LOGIN_URL
-        else:
-            url = login_url
+            raise RuntimeError("No login URL")
         protocol, host, port, server_context, \
-            tap_context = self._Tap__parseUrl(url)
+            tap_context = self._Tap__parseUrl(login_url)
         connHandler = httplib.HTTPConnection(host, 80)
         context = '/ac/login'
         header = {
@@ -405,7 +403,7 @@ class TapPlusCadc(TapPlus):
         }
         connHandler.request("POST", context, data, header)
         response = connHandler.getresponse()
-        if verbose:
+        if(verbose):
             print(response.status, response.reason)
             print(response.getheaders())
         return response

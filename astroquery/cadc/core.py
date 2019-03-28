@@ -6,30 +6,22 @@ CADC
 
 """
 
+import logging
 from ..utils.class_or_instance import class_or_instance
 from ..utils import async_to_sync, commons
 from ..query import BaseQuery
-# prepend_docstr is a way to copy docstrings between methods
-from ..utils import prepend_docstr_nosections
 from bs4 import BeautifulSoup
-import astropy
-import astroquery
 from six import BytesIO
 from astropy.io.votable import parse_single_table
-from . import conf
 from astroquery.cadc.cadctap.core import TapPlusCadc
 from astroquery.cadc.cadctap.job import JobCadc
-import logging
-import xml
-import re
+from . import conf
 
 import requests
 
 __all__ = ['Cadc', 'CadcClass']
 
-DEFAULT_URL = 'http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/tap'
-# TODO - this needs to be deduced through the registry
-
+CADC_COOKIE_PREFIX = 'CADC_SSO'
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +56,12 @@ class CadcClass(BaseQuery):
     CADC_REGISTRY_URL = conf.CADC_REGISTRY_URL
     CADCTAP_SERVICE_URI = conf.CADCTAP_SERVICE_URI
     CADCDATALINK_SERVICE_URI = conf.CADCDATLINK_SERVICE_URI
+    CADCLOGIN_SERVICE_URI = conf.CADCLOGIN_SERVICE_URI
     TIMEOUT = conf.TIMEOUT
 
     def __init__(self, url=None, tap_plus_handler=None, verbose=False):
         """
-        Initialize CadcTAP object
+        Initialize Cadc object
 
         Parameters
         ----------
@@ -81,7 +74,7 @@ class CadcClass(BaseQuery):
 
         Returns
         -------
-        CadcTAP object
+        Cadc object
         """
 
         if url is not None and tap_plus_handler is not None:
@@ -104,9 +97,7 @@ class CadcClass(BaseQuery):
             self.CADCDATALINK_SERVICE_URI,
             "ivo://ivoa.net/std/DataLink#links-1.0")
 
-
-    def login(self, user=None, password=None, certificate_file=None,
-              cookie_prefix=None, login_url=None, verbose=False):
+    def login(self, user=None, password=None, certificate_file=None):
         """
         Login, set varibles to use for logging in
 
@@ -118,15 +109,14 @@ class CadcClass(BaseQuery):
             password to login with
         certificate : str, required if user is None
             path to certificate to use with logging in
-        verbose : bool, optional, default 'False'
-            flag to display information about the process
         """
-
+        login_url = get_access_url(self.CADCLOGIN_SERVICE_URI,
+                                   'ivo://ivoa.net/std/UMS#login-0.1')
         return self.__cadctap.login(user=user, password=password,
                                     certificate_file=certificate_file,
-                                    cookie_prefix=cookie_prefix,
+                                    cookie_prefix=CADC_COOKIE_PREFIX,
                                     login_url=login_url,
-                                    verbose=verbose)
+                                    verbose=False)
 
     def logout(self, verbose=False):
         """
@@ -135,7 +125,7 @@ class CadcClass(BaseQuery):
         return self.__cadctap.logout(verbose)
 
     @class_or_instance
-    def query_region_async(self, coordinates, radius = 0.016666666666667,
+    def query_region_async(self, coordinates, radius=0.016666666666667,
                            collection=None,
                            get_query_payload=False):
         """
@@ -188,11 +178,11 @@ class CadcClass(BaseQuery):
         response = self.run_query(
             "select * from caom2.Observation o join caom2.Plane p "
             "on o.obsID=p.obsID where lower(target_name) like '%{}%'".
-                format(name.lower()), operation='sync')
+            format(name.lower()), operation='sync')
         return response
 
     @class_or_instance
-    def get_data_urls(self, query_result, include_auxilaries=False):
+    def get_data_urls(self, query_result, include_auxiliaries=False):
         """
         Function to map the results of a CADC query into URLs to
         corresponding data that can be later downloaded.
@@ -201,7 +191,7 @@ class CadcClass(BaseQuery):
         (http://www.ivoa.net/documents/DataLink/) implemented at the CADC.
         It works directly with the results produced by Cadc.query_region and
         Cadc.query_name but in principle it can work with other query
-        results produced with the CadcTAP query as long as the results
+        results produced with the Cadc query as long as the results
         contain the 'caomPublisherID' column. This column is part of the
         caom2.Plane table.
 
@@ -241,7 +231,7 @@ class CadcClass(BaseQuery):
                 semantics = row['semantics'].decode('ascii')
                 if semantics == '#this':
                     result.append(row['access_url'].decode('ascii'))
-                elif row['access_url'] and include_auxilaries:
+                elif row['access_url'] and include_auxiliaries:
                     result.append(row['access_url'].decode('ascii'))
         return result
 
@@ -434,7 +424,6 @@ class CadcClass(BaseQuery):
         """
         return self.__cadctap.save_results(job, filename, verbose)
 
-
     def _parse_reg(self, content):
         # parses the CADC registry and returns a dictionary of services and
         # the URL to their capabilities
@@ -447,7 +436,7 @@ class CadcClass(BaseQuery):
 
     def _parse_result(self, result, verbose=False):
         # result is a job
-        #TODO check state of the job
+        # TODO check state of the job
         if result._phase != 'COMPLETED':
             raise RuntimeError('Query not completed')
         return result.results
@@ -466,7 +455,7 @@ class CadcClass(BaseQuery):
             format(coordinates.ra.degree, coordinates.dec.degree, radius)
         if ['collection' in kwargs] and kwargs['collection']:
             payload['query'] = "{} AND collection='{}'".\
-                format(payload['query'],kwargs['collection'])
+                format(payload['query'], kwargs['collection'])
         return payload
 
 
@@ -477,20 +466,26 @@ def static_vars(**kwargs):
         return func
     return decorate
 
+
 @static_vars(caps={})
 def get_access_url(service, capability=None):
     """
     Returns the URL corresponding to a service by doing a lookup in the cadc
     registry. It returns the access URL corresponding to cookie authentication.
-
-    This function implements the functionality of a CADC registry as defined by the IVOA.
-    It should be eventually moved to its own directory.
     :param service: the service the capability belongs to. It can be identified
-    by a CADC uri ('ivo://cadc.nrc.ca/) which is looked up in the CADC registry or
-    by the URL where the service capabilities is found.
+    by a CADC uri ('ivo://cadc.nrc.ca/) which is looked up in the CADC registry
+    or by the URL where the service capabilities is found.
     :param capability: uri representing the capability for which the access
     url is sought
     :return: the access url
+
+    Note
+    ------
+    This function implements the functionality of a CADC registry as defined
+    by the IVOA. It should be eventually moved to its own directory.
+
+    Caching should be considered to reduce the number of remote calls to
+    CADC registry
     """
 
     caps_url = ''
@@ -511,7 +506,8 @@ def get_access_url(service, capability=None):
             for line in r.text.splitlines():
                 if len(line) > 0 and not line.startswith('#'):
                     service_id, capabilies_url = line.split('=')
-                    get_access_url.caps[service_id.strip()] = capabilies_url.strip()
+                    get_access_url.caps[service_id.strip()] = \
+                        capabilies_url.strip()
         # lookup the service
         service_uri = service
         if not service.startswith('ivo'):
@@ -532,19 +528,19 @@ def get_access_url(service, capability=None):
             "ERROR getting the service capabilities: {}".format(str(e)))
         raise e
 
-    soup = BeautifulSoup(c.text)
+    soup = BeautifulSoup(c.text, features="html5lib")
     for cap in soup.find_all('capability'):
         if cap.get("standardid", None) == capability:
             if len(cap.find_all('interface')) == 1:
-                return cap.find_all('interface')[0].accessurl
+                return cap.find_all('interface')[0].accessurl.text
             for i in cap.find_all('interface'):
                 if hasattr(i, 'securitymethod'):
                     sm = i.securitymethod
-                    if not sm or sm.get("standardid", None) == None or\
-                        sm['standardid']=="ivo://ivoa.net/sso#cookie":
+                    if not sm or sm.get("standardid", None) is None or\
+                       sm['standardid'] == "ivo://ivoa.net/sso#cookie":
                         return i.accessurl.text
-    raise RuntimeError("ERROR - capabilitiy {} not found".format(capability))
+    raise RuntimeError("ERROR - capabilitiy {} not found or not working with "
+                       "anonymous or cookie access".format(capability))
 
 
-Cadc = CadcClass()
-
+Cadc = CadcClass

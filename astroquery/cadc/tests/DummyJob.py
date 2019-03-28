@@ -13,6 +13,7 @@ class DummyJob(object):
         self.parameters = {}
         self.jobid = '123'
         self.outputFile = 'file.txt'
+        self._phase = 'new'
         self.remoteLocation = 'www.host.com/place'
         self.results = 'results'
         self.connHandler = None

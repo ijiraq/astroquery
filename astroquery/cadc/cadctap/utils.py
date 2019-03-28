@@ -6,9 +6,9 @@ TAP plus
 
 """
 import io
+import six
 from astropy import units as u
 from astropy.table import Table as APTable
-import six
 
 """
 Reason for change
@@ -45,7 +45,7 @@ def read_http_response(response, outputFormat, correct_units=True):
                 try:
                     col.unit = u.Unit(
                         col.unit.name.replace(".", " ").replace("'", ""))
-                except Exception as ex:
+                except Exception:
                     pass
             elif isinstance(col.unit, str):
                 col.unit = col.unit.replace(".", " ").replace("'", "")
