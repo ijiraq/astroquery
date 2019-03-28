@@ -52,7 +52,7 @@ data.
 
 
 The next example queries all the data in that region and filters the results
-on the name of the target (as an example, any other filtering possible) and
+on the name of the target (as an example - any other filtering possible) and
 resolves the URLs for both the primary and auxiliary data (in this case
 preview files)
 
@@ -78,7 +78,7 @@ preview files)
 
 
 CADC data can also be queried on the target name. Note that the name is not
-resolve. Instead it is matched against the target name in the CADC metadata.
+resolved. Instead it is matched against the target name in the CADC metadata.
 
 .. code-block:: python
 
@@ -104,7 +104,7 @@ access to proprietary data can call ```login``` on the ```cadc``` object
 before querying or accessing the data.
 
 CADC metadata is available through a TAP service. While the above interfaces
-offer a quick but simple access to the data, the TAP interface presented in
+offer a quick and simple access to the data, the TAP interface presented in
 the next sections allows for more complex queries.
 
 =============================
@@ -562,8 +562,3 @@ List all asynchronous jobs the user has created. Must be logged in in order to k
   ...
 
 
-Reference/API
-=============
-
-.. automodapi:: astroquery.cadc
-    :no-inheritance-diagram:
