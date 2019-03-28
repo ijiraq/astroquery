@@ -6,22 +6,21 @@
 Cadc (`astroquery.cadc`)
 *****************************
 
-The Canadian Astronomy Data Centre (CADC) is a world-wide distribution centre for
-astronomical data obtained from telescopes. The CADC specializes in data mining,
-data processing, data distribution and data transferring of very large
-astronomical datasets.
+The Canadian Astronomy Data Centre (CADC) provides a open access portal for
+astronomical data obtained at astronomical observatories. The CADC staff specializes in the mining,
+processing, distribution and transferring of very large astronomical data sets.
 
-This package allows the access to the data at the CADC
+The astroquery.cadc package enables interaction with the CADC to the data discovery system 
 (http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca)
 
 ============
 Basic Access
 ============
 
-The most basic ways to access the CADC data and metadata is by region or by
-name. The following example queries CADC for Canada France Hawaii Telescope
-data for a given region and resolves the URLs for downloading the corresponding
-data.
+The most basic ways to access the CADC data and metadata is by sky region or by
+target name. The following example queries the CADC metadata collection for Canada France Hawaii Telescope observations 
+that overlap with a particular point onthe sky 
+and resolves the resuliting information into a URL that can be used to retrieve the files containing the observational data.
 
 .. code-block:: python
 
@@ -52,7 +51,7 @@ data.
 
 
 The next example queries all the data in that region and filters the results
-on the name of the target (as an example - any other filtering possible) and
+on the name of the target (as an example -  other filtering is possible) and
 resolves the URLs for both the primary and auxiliary data (in this case
 preview files)
 
@@ -78,7 +77,7 @@ preview files)
 
 
 CADC data can also be queried on the target name. Note that the name is not
-resolved. Instead it is matched against the target name in the CADC metadata.
+resolved. Instead a string match against the target name as recorded in the CADC metadata is performed.
 
 .. code-block:: python
 
@@ -123,7 +122,7 @@ TAP provides two operation modes: Synchronous and Asynchronous:
 
 * Synchronous: the response to the request will be generated as soon as the
   request received by the server.
-  (Do not use this method for queries that generate a big amount of results.)
+  (Do not use this method for queries that generate a large number of results.)
 * Asynchronous: the server will start a job that will execute the request.
   The first response to the request is the required information (a link)
   to obtain the job status.
@@ -135,7 +134,7 @@ with the CADC, go to http://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/, choose a
 language, click on Login in the top right area, click on the Request an Account
 link, enter your information and wait for confirmation of your account creation.
 
-There are two type of authentication:
+There are two types of authentication:
 
 * Username/Password
   Cadc().login(user='yourusername', password='yourpassword')
@@ -146,11 +145,11 @@ There are two type of authentication:
 For certificate authentication to get a certificate go to
 https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/, choose a language, login, click
 on your name where the login button used to be, from the drop-down menu click
-Obtain a Certificate and save the certificate. When adding authentication used
-the path to where you saved the certificate. Remember that certificates expire
-and you will need to get a new one.
+Obtain a Certificate and save the certificate. When using certificate authentication use
+the path to where you saved the certificate. Certificates retrieved from the CADC login process expire 
+(no longer provide access) after 30 calendar days.
 
-When logging in only one form of authentication is allowed, attempts to set both
+One form of authentication is allowed, attempts to set both
 or when one is set attempting to set the other will not work. When logged in
 authentication will be applied to each call, when a job is created with authentication
 any further calls will require authentication.
@@ -279,8 +278,8 @@ To get a single table object
 1.3 Run synchronous query
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A synchronous query will not store the results at server side. These queries
-must be used when the amount of data to be retrieve is 'small'. 
+A synchronous query will not store the resulting data table on server side. These queries
+can be used when the number of resulting rows is 'small'. 
 
 There is a limit of 2000 rows. If you need more than that, you must use asynchronous queries.
 
@@ -333,7 +332,7 @@ Query saving results in a file:
 1.5 Synchronous query with temporary uploaded table
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A table can be uploaded to the server in order to be used in a query.
+A table can be uploaded to the server in order to be used in a query, the table will only be accessbile during the run_query, once the query is completed the table is removed from the service.
 
 .. code-block:: python
 
@@ -358,9 +357,9 @@ A table can be uploaded to the server in order to be used in a query.
 
 Asynchronous queries save results at server side. These queries can be accessed at any time.
 
-The results can be saved in memory (default) or in a file.
+When the user retrieves the result of an async query, the results can be saved in memory (default) or in a file.
 
-Query without saving results in a file:
+Async query without saving results in a file:
 
 .. code-block:: python
 
@@ -436,8 +435,9 @@ Query saving results in a file:
 1.7 Load job
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Asynchronous jobs can be loaded. You need the jobid in order to load the job.
+Asynchronous queies create jobs.  Jobs that were previously excuted can be loaded. You need the jobid in order to load the job.
 
+A user must be authenticate (logged in) to use the load_async_job function.
 
 .. code-block:: python
 
